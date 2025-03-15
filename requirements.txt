@@ -1,0 +1,8 @@
+Flask
+python-wordpress-xmlrpc
+requests
+Pillow
+Jinja2
+python-dotenv
+googletrans==3.1.0a0
+

@@ -54,6 +54,12 @@
                     <div id="translated-keywords" class="translated-text"></div>
                 </div>
 
+                <div class="form-group">
+                    <label>Etiketler (virgülle ayırın):</label>
+                    <input type="text" id="tags" name="tags">
+                    <div class="help-text">Boş bırakırsanız anahtar kelimeler etiket olarak kullanılacaktır</div>
+                </div>
+
                 <!-- Resim Seçimi -->
                 <div class="form-group">
                     <label>Görseller:</label>
@@ -62,6 +68,14 @@
                             <option value="pexels">Pexels</option>
                             <option value="unsplash">Unsplash</option>
                         </select>
+
+                        <div class="image-size-controls">
+                            <label>Min. Genişlik:</label>
+                            <input type="number" id="min-width" name="min_width" value="800" min="400" max="3000">
+                            <label>Min. Yükseklik:</label>
+                            <input type="number" id="min-height" name="min_height" value="600" min="300" max="2000">
+                        </div>
+
                         <div class="selected-count">Seçili: <span id="selected-count">0</span>/4</div>
                     </div>
 
@@ -72,6 +86,34 @@
                     <div class="selected-images-preview">
                         <h4>Seçili Görseller</h4>
                         <p class="help-text">İlk seçilen görsel öne çıkan görsel olarak kullanılacak</p>
+
+                        <!-- Görsel Hizalama Seçenekleri -->
+                        <div class="alignment-options">
+                            <label>Öne Çıkan Görsel Hizalama:</label>
+                            <select id="featured-image-alignment" name="image_alignment">
+                                <option value="none">Hizalama Yok</option>
+                                <option value="left">Sola Hizala</option>
+                                <option value="center">Ortala</option>
+                                <option value="right">Sağa Hizala</option>
+                                <option value="wide">Geniş</option>
+                                <option value="full">Tam Genişlik</option>
+                            </select>
+
+                            <label>İçerik Görselleri Hizalama:</label>
+                            <select id="content-image-alignment" name="content_image_alignment">
+                                <option value="none">Hizalama Yok</option>
+                                <option value="left">Sola Hizala</option>
+                                <option value="center">Ortala</option>
+                                <option value="right">Sağa Hizala</option>
+                                <option value="bottom">Yazının Altında</option>
+                            </select>
+
+                            <div class="alignment-special-options">
+                                <input type="checkbox" id="alternating-alignment" name="alternating_alignment">
+                                <label for="alternating-alignment">Bir Sola Bir Sağa Hizala</label>
+                            </div>
+                        </div>
+
                         <div id="selected-images-list" class="selected-images-list">
                             <!-- Seçili resimler buraya eklenecek -->
                         </div>
@@ -99,6 +141,7 @@
                 <h3 id="preview-title"></h3>
                 <div id="preview-images" class="preview-images"></div>
                 <div id="preview-content"></div>
+                <div id="preview-tags" class="preview-tags"></div>
             </div>
         </div>
 
@@ -135,12 +178,35 @@
                 <label>Şablon İçeriği:</label>
                 <textarea id="template-content" rows="10" placeholder="Şablon İçeriği"></textarea>
                 <p class="help-text">
-                    Kullanılabilir değişkenler: {title}, {content}, {tags}, {sources}, {featured_image}, {content_images}
+                    Kullanılabilir değişkenler: {title}, {content}, {tags}, {featured_image}, {content_images}, {image_alignment}
                 </p>
             </div>
             <div class="modal-actions">
                 <button onclick="saveTemplate()" class="primary-button">Kaydet</button>
                 <button onclick="closeModal()" class="secondary-button">İptal</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Görsel Boyutlandırma Modalı -->
+    <div id="resize-modal" class="modal">
+        <div class="modal-content">
+            <h3>Görsel Boyutlandırma</h3>
+            <div class="form-group">
+                <label>Genişlik:</label>
+                <input type="number" id="resize-width" value="800" min="400" max="2000">
+            </div>
+            <div class="form-group">
+                <label>Yükseklik:</label>
+                <input type="number" id="resize-height" value="600" min="300" max="1500">
+            </div>
+            <div class="form-group">
+                <label>Oran Koru:</label>
+                <input type="checkbox" id="maintain-aspect" checked>
+            </div>
+            <div class="modal-actions">
+                <button onclick="resizeSelectedImage()" class="primary-button">Boyutlandır</button>
+                <button onclick="closeResizeModal()" class="secondary-button">İptal</button>
             </div>
         </div>
     </div>

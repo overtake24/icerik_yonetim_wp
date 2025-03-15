@@ -1,7 +1,8 @@
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods.posts import NewPost
 from wordpress_xmlrpc.methods.media import UploadFile
-from wordpress_xmlrpc.methods import media
+from wordpress_xmlrpc.methods import taxonomies
+from wordpress_xmlrpc.methods import posts
 import os
 
 
@@ -31,7 +32,7 @@ class WordpressClient:
                 print(f"Resim yükleme hatası: {e}")
                 return None
 
-    def upload_post(self, title, content, image_path, publish_date):
+    def upload_post(self, title, content, image_path, publish_date, tags=None):
         """WordPress'e yazıyı ek dosya kimliği ile birlikte yükler."""
         post = WordPressPost()
         post.title = title
@@ -44,6 +45,11 @@ class WordpressClient:
         image_data = None
         if image_path and os.path.exists(image_path):
             image_data = self.upload_image(image_path)
+        elif isinstance(image_path, str) and image_path.startswith('http'):
+            # Doğrudan URL olarak geçildi
+            post.content = content
+        else:
+            post.content = content
 
         if image_data:
             # Öne çıkan görsel olarak ayarla
@@ -55,9 +61,34 @@ class WordpressClient:
         else:
             post.content = content
 
+        # Etiketleri ekle
+        if tags:
+            if isinstance(tags, str):
+                # Virgülle ayrılmış string ise listeye çevir
+                tag_list = [tag.strip() for tag in tags.split(',')]
+            else:
+                tag_list = tags
+
+            post.terms_names = {
+                'post_tag': tag_list
+            }
+
         try:
             post_id = self.client.call(NewPost(post))
             return post_id
         except Exception as e:
             print(f"İçerik yükleme hatası: {e}")
             return None
+
+    def get_image_alignment_options(self):
+        """
+        WordPress Gutenberg'den kullanılabilir resim hizalama seçeneklerini döndürür
+        """
+        return {
+            'none': 'Hizalama Yok',
+            'left': 'Sola Hizala',
+            'center': 'Ortala',
+            'right': 'Sağa Hizala',
+            'wide': 'Geniş',
+            'full': 'Tam Genişlik'
+        }

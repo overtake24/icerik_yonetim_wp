@@ -4,6 +4,7 @@ from modules.image_module import fetch_and_resize_image, fetch_multiple_images
 from modules.translation_manager import TranslationManager
 from modules.content_module import generate_content
 from datetime import datetime
+import json
 
 
 def handle_form_submission(data, wp_client):
@@ -12,19 +13,114 @@ def handle_form_submission(data, wp_client):
     translation_manager = TranslationManager()
 
     try:
+        # Alternatif hizalama seçeneğini kontrol et
+        alternating_alignment = data.get('alternating_alignment') == '1'
+
         # Anahtar kelimeleri çevir
         translated_keywords = translation_manager.translate_to_english(data['keywords'])
 
-        # Birden fazla görsel getir
+        # Görselleri hazırla
         image_urls = []
-        if 'image_urls' in data:
-            image_urls = data['image_urls'].split(',')
-        else:
-            # Eğer görsel URL'leri yoksa yeni görseller getir
-            image_urls = fetch_multiple_images(translated_keywords, count=4, source=data.get('source', 'pexels'))
+
+        # İlk olarak öne çıkan görsel için image_url'i kontrol et
+        if 'image_url' in data and data['image_url']:
+            image_urls.append(data['image_url'])
+
+        # image_urls parametresini kontrol et
+        if 'image_urls' in data and data['image_urls']:
+            if isinstance(data['image_urls'], str):
+                # Virgülle ayrılmış liste ise
+                urls = [url.strip() for url in data['image_urls'].split(',')]
+                for url in urls:
+                    if url and url not in image_urls:
+                        image_urls.append(url)
+            elif isinstance(data['image_urls'], list):
+                # Liste ise
+                for url in data['image_urls']:
+                    if url and url not in image_urls:
+                        image_urls.append(url)
+
+        # Eğer hiç görsel yoksa yeni görseller getir
+        if not image_urls:
+            print("Görsel bulunamadı, API ile yeni görseller getiriliyor...")
+            fetched_urls, _ = fetch_multiple_images(
+                translated_keywords,
+                count=4,
+                source=data.get('source', 'pexels'),
+                min_width=int(data.get('min_width', 800)),
+                min_height=int(data.get('min_height', 600))
+            )
+            image_urls = fetched_urls
 
         if not image_urls:
             return {"status": "error", "message": "Görsel alınırken bir hata oluştu."}
+
+        # İçerik görsellerini hazırla
+        content_images = []
+
+        # İçerik görselleri parametrelerini kontrol et
+        if 'content_images' in data and data['content_images']:
+            content_images_data = data['content_images']
+
+            # String ise JSON olarak parse et
+            if isinstance(content_images_data, str):
+                try:
+                    content_images_data = json.loads(content_images_data)
+                except Exception as e:
+                    print(f"JSON parse hatası: {e}")
+                    # Virgülle ayrılmış liste ise
+                    if ',' in content_images_data:
+                        content_images_data = [url.strip() for url in content_images_data.split(',')]
+                    else:
+                        content_images_data = [content_images_data]
+
+            # Liste değilse liste yap
+            if not isinstance(content_images_data, list):
+                content_images_data = [content_images_data]
+
+            # İçerik görselleri (öne çıkan görsel hariç)
+            for item in content_images_data:
+                if isinstance(item, dict) and 'url' in item:
+                    content_images.append({
+                        'url': item['url'],
+                        'alignment': item.get('alignment', data.get('content_image_alignment', 'none'))
+                    })
+                elif isinstance(item, str) and item:
+                    content_images.append({
+                        'url': item,
+                        'alignment': data.get('content_image_alignment', 'none')
+                    })
+
+        # Yedek olarak content_image_urls parametresini kontrol et
+        elif 'content_image_urls' in data and data['content_image_urls']:
+            content_image_urls = data['content_image_urls']
+
+            if isinstance(content_image_urls, str) and ',' in content_image_urls:
+                urls = [url.strip() for url in content_image_urls.split(',')]
+                for url in urls:
+                    if url:
+                        content_images.append({
+                            'url': url,
+                            'alignment': data.get('content_image_alignment', 'none')
+                        })
+            elif isinstance(content_image_urls, str) and content_image_urls.strip():
+                content_images.append({
+                    'url': content_image_urls.strip(),
+                    'alignment': data.get('content_image_alignment', 'none')
+                })
+
+        # Eğer image_urls'den fazla görsel varsa ve content_images boşsa
+        elif len(image_urls) > 1 and not content_images:
+            for url in image_urls[1:]:  # İlk görsel hariç
+                content_images.append({
+                    'url': url,
+                    'alignment': data.get('content_image_alignment', 'none')
+                })
+
+        # Etiketleri hazırla
+        tags = data.get('tags', '')
+        if not tags and 'keywords' in data:
+            tags = data['keywords']  # Etiket yoksa anahtar kelimeleri kullan
 
         # Şablonu uygula
         template_name = data.get('template', 'default')
@@ -32,18 +128,29 @@ def handle_form_submission(data, wp_client):
             template_name,
             title=data['title'],
             content=data['content'],
-            tags=data['keywords'],
+            tags=tags,
             featured_image=image_urls[0] if image_urls else None,
-            content_images=image_urls[1:] if len(image_urls) > 1 else []
+            content_images=content_images,
+            image_alignment=data.get('image_alignment', 'none'),
+            content_image_alignment=data.get('content_image_alignment', 'none'),
+            alternating_alignment=alternating_alignment,
+            date=datetime.now().strftime('%d.%m.%Y')
         )
 
         # WordPress'e gönder
-        publish_date = datetime.strptime(data['publish_date'], '%Y-%m-%dT%H:%M') if 'publish_date' in data else None
+        publish_date = None
+        if 'publish_date' in data and data['publish_date']:
+            try:
+                publish_date = datetime.strptime(data['publish_date'], '%Y-%m-%dT%H:%M')
+            except Exception as e:
+                print(f"Tarih çevirme hatası: {e}")
+
         post_id = wp_client.upload_post(
             data['title'],
             formatted_content,
             image_urls[0] if image_urls else None,
-            publish_date
+            publish_date,
+            tags=tags.split(',') if isinstance(tags, str) else tags
         )
 
         if post_id:
@@ -61,4 +168,6 @@ def handle_form_submission(data, wp_client):
             return {"status": "error", "message": "WordPress'e gönderilirken bir hata oluştu."}
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"status": "error", "message": f"İşlem sırasında bir hata oluştu: {str(e)}"}

@@ -5,6 +5,7 @@ from modules.translation_manager import TranslationManager
 from modules.content_module import generate_content
 from datetime import datetime
 import json
+import traceback
 
 
 def handle_form_submission(data, wp_client):
@@ -43,17 +44,22 @@ def handle_form_submission(data, wp_client):
         # Eğer hiç görsel yoksa yeni görseller getir
         if not image_urls:
             print("Görsel bulunamadı, API ile yeni görseller getiriliyor...")
-            fetched_urls, _ = fetch_multiple_images(
-                translated_keywords,
-                count=4,
-                source=data.get('source', 'pexels'),
-                min_width=int(data.get('min_width', 800)),
-                min_height=int(data.get('min_height', 600))
-            )
-            image_urls = fetched_urls
+            try:
+                fetched_urls, _ = fetch_multiple_images(
+                    translated_keywords,
+                    count=4,
+                    source=data.get('source', 'pexels'),
+                    min_width=int(data.get('min_width', 800)),
+                    min_height=int(data.get('min_height', 600))
+                )
+                image_urls = fetched_urls
+            except Exception as img_error:
+                print(f"Görsel getirme hatası: {img_error}")
+                # Hata olsa bile devam et, ancak log tut
 
         if not image_urls:
-            return {"status": "error", "message": "Görsel alınırken bir hata oluştu."}
+            print("Uyarı: Hiç görsel getirilemedi, içerik görselsiz olarak kullanılacak.")
+            # Görselsiz de devam edebilir
 
         # İçerik görsellerini hazırla
         content_images = []
@@ -122,20 +128,28 @@ def handle_form_submission(data, wp_client):
         if not tags and 'keywords' in data:
             tags = data['keywords']  # Etiket yoksa anahtar kelimeleri kullan
 
-        # Şablonu uygula
-        template_name = data.get('template', 'default')
-        formatted_content = template_manager.apply_template(
-            template_name,
-            title=data['title'],
-            content=data['content'],
-            tags=tags,
-            featured_image=image_urls[0] if image_urls else None,
-            content_images=content_images,
-            image_alignment=data.get('image_alignment', 'none'),
-            content_image_alignment=data.get('content_image_alignment', 'none'),
-            alternating_alignment=alternating_alignment,
-            date=datetime.now().strftime('%d.%m.%Y')
-        )
+        try:
+            # Şablonu uygula
+            template_name = data.get('template', 'default')
+            formatted_content = template_manager.apply_template(
+                template_name,
+                title=data['title'],
+                content=data['content'],
+                tags=tags,
+                featured_image=image_urls[0] if image_urls else None,
+                content_images=content_images,
+                image_alignment=data.get('image_alignment', 'none'),
+                content_image_alignment=data.get('content_image_alignment', 'none'),
+                alternating_alignment=alternating_alignment,
+                date=datetime.now().strftime('%d.%m.%Y')
+            )
+        except Exception as template_error:
+            print(f"Şablon uygulama hatası: {template_error}")
+            # Hata durumunda basit içerik üret
+            formatted_content = f"<h1>{data['title']}</h1>\n\n{data['content']}"
+            if image_urls:
+                formatted_content = f"<img src='{image_urls[0]}' alt='{data['title']}' />\n\n" + formatted_content
+            formatted_content += f"\n\n<p>Etiketler: {tags}</p>"
 
         # WordPress'e gönder
         publish_date = None
@@ -145,29 +159,33 @@ def handle_form_submission(data, wp_client):
             except Exception as e:
                 print(f"Tarih çevirme hatası: {e}")
 
-        post_id = wp_client.upload_post(
-            data['title'],
-            formatted_content,
-            image_urls[0] if image_urls else None,
-            publish_date,
-            tags=tags.split(',') if isinstance(tags, str) else tags
-        )
+        try:
+            post_id = wp_client.upload_post(
+                data['title'],
+                formatted_content,
+                image_urls[0] if image_urls else None,
+                publish_date,
+                tags=tags.split(',') if isinstance(tags, str) else tags
+            )
 
-        if post_id:
-            # Veritabanına kaydet
-            history_manager.save_post({
-                'title': data['title'],
-                'content': formatted_content,
-                'keywords': data['keywords'],
-                'image_url': image_urls[0] if image_urls else None,
-                'template': template_name
-            }, post_id)
+            if post_id:
+                # Veritabanına kaydet
+                history_manager.save_post({
+                    'title': data['title'],
+                    'content': formatted_content,
+                    'keywords': data['keywords'],
+                    'image_url': image_urls[0] if image_urls else None,
+                    'template': template_name
+                }, post_id)
 
-            return {"status": "success", "message": "İçerik başarıyla WordPress'e gönderildi!"}
-        else:
-            return {"status": "error", "message": "WordPress'e gönderilirken bir hata oluştu."}
+                return {"status": "success", "message": "İçerik başarıyla WordPress'e gönderildi!"}
+            else:
+                return {"status": "error", "message": "WordPress'e gönderilirken bir hata oluştu."}
+        except Exception as wp_error:
+            print(f"WordPress gönderim hatası: {wp_error}")
+            traceback.print_exc()
+            return {"status": "error", "message": f"WordPress'e gönderilirken bir hata oluştu: {str(wp_error)}"}
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
         return {"status": "error", "message": f"İşlem sırasında bir hata oluştu: {str(e)}"}

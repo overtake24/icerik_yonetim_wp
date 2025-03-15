@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 import html
+import re
 from typing import Dict, List, Optional
 
 
@@ -135,11 +136,18 @@ class TemplateManager:
                             else:
                                 img_align = img_data.get('alignment', kwargs.get('content_image_alignment', 'none'))
 
-                        # Boş URL kontrolü
-                        if img_url:
+                        # Bottom hizalama için özel işlem
+                        if img_align == 'bottom':
+                            # Yazının en altına ekle
                             formatted_images.append(
-                                self._format_content_image(img_url, f"İçerik görseli {i}", img_align)
+                                self._format_bottom_image(img_url, f"İçerik görseli {i}")
                             )
+                        else:
+                            # Boş URL kontrolü
+                            if img_url:
+                                formatted_images.append(
+                                    self._format_content_image(img_url, f"İçerik görseli {i}", img_align)
+                                )
                     except Exception as e:
                         print(f"Görsel formatlarken hata: {e}, data: {img_data}")
                         # Hatayı yut ve devam et
@@ -159,8 +167,33 @@ class TemplateManager:
             # Image_alignment değerini template'e ekle
             kwargs['image_alignment'] = image_alignment
 
+            # Şablonda bulunmayan değişkenler için çözüm
+            # Şablonda kullanılan tüm değişkenleri bul
+            template_vars = re.findall(r'\{([^{}]*)\}', template_content)
+
+            # Eksik değişkenler için boş değer ata
+            for var in template_vars:
+                if var not in kwargs:
+                    if '"' in var:  # WordPress bloğu için ek çift tırnaklı attribute
+                        # Örn: {"className":"featured-image"}
+                        kwargs[var] = ""
+                    else:
+                        kwargs[var] = ""
+
             return template_content.format(**kwargs)
 
+        except KeyError as e:
+            import traceback
+            traceback.print_exc()
+            print(f"Şablon değişkeni bulunamadı: {e}")
+            # WordPress bloğundaki çift tırnaklı değişkenler için düzeltme
+            if '"' in str(e):
+                # Eksik değişkeni şablondan temizle
+                template_content = template_content.replace('{' + str(e).strip("'") + '}', '')
+                # Yeniden dene
+                return self.apply_template(template_name, **kwargs)
+            else:
+                raise Exception(f"Şablon uygulama hatası: Eksik değişken: {str(e)}")
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -184,6 +217,14 @@ class TemplateManager:
         return f"""<!-- wp:image {{"align":"{alignment}"}} -->
 <figure class="wp-block-image {align_class}">
     <img src="{image_url}" alt="{html.escape(alt_text)}" class="content-image"/>
+</figure>
+<!-- /wp:image -->"""
+
+    def _format_bottom_image(self, image_url: str, alt_text: str = '') -> str:
+        # Yazının altına eklenen görseller için özel format
+        return f"""<!-- wp:image {{"align":"center"}} -->
+<figure class="wp-block-image aligncenter">
+    <img src="{image_url}" alt="{html.escape(alt_text)}" class="content-image bottom-image"/>
 </figure>
 <!-- /wp:image -->"""
 

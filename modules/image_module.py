@@ -3,6 +3,7 @@ from PIL import Image
 from io import BytesIO
 import os
 from dotenv import load_dotenv
+import urllib.parse  # URL encoding için eklendi
 
 load_dotenv("config.env")
 
@@ -10,21 +11,32 @@ load_dotenv("config.env")
 def fetch_image_url(keywords, source="pexels", min_width=800, min_height=600):
     """Pexels veya Unsplash'tan minimum boyut kriterini karşılayan resim URL'sini alır."""
     if not keywords:
-        return None
+        return None, None
 
     if source == "pexels":
         api_key = os.getenv("PEXELS_API_KEY")
         if not api_key:
-            return None
+            print("Pexels API anahtarı bulunamadı.")
+            return None, None
 
         headers = {"Authorization": api_key}
         try:
-            # Daha fazla resim getir ve filtreleme yapabilmek için
-            response = requests.get(f"https://api.pexels.com/v1/search?query={keywords}&per_page=15", headers=headers)
+            # URL encode yapalım
+            encoded_keywords = urllib.parse.quote(keywords)
+            api_url = f"https://api.pexels.com/v1/search?query={encoded_keywords}&per_page=15"
+
+            print(f"Pexels API isteği gönderiliyor: {api_url}")
+            response = requests.get(api_url, headers=headers, timeout=15)
+
+            if response.status_code != 200:
+                print(f"Pexels API yanıt kodu hatalı: {response.status_code}")
+                return None, None
+
             response_json = response.json()
 
             if "photos" not in response_json or not response_json["photos"]:
-                return None
+                print(f"Pexels API sonuç bulunamadı.")
+                return None, None
 
             # Boyut kriterine göre filtrele
             for photo in response_json["photos"]:
@@ -46,14 +58,25 @@ def fetch_image_url(keywords, source="pexels", min_width=800, min_height=600):
     elif source == "unsplash":
         access_key = os.getenv("UNSPLASH_ACCESS_KEY")
         if not access_key:
+            print("Unsplash API anahtarı bulunamadı.")
             return None, None
 
         try:
-            # Daha fazla resim getir
-            response = requests.get(f"https://api.unsplash.com/photos/random?query={keywords}&count=10&client_id={access_key}")
+            # URL encode yapalım
+            encoded_keywords = urllib.parse.quote(keywords)
+            api_url = f"https://api.unsplash.com/photos/random?query={encoded_keywords}&count=10&client_id={access_key}"
+
+            print(f"Unsplash API isteği gönderiliyor: {api_url}")
+            response = requests.get(api_url, timeout=15)
+
+            if response.status_code != 200:
+                print(f"Unsplash API yanıt kodu hatalı: {response.status_code}")
+                return None, None
+
             response_json = response.json()
 
             if not isinstance(response_json, list) or not response_json:
+                print(f"Unsplash API sonuç bulunamadı.")
                 return None, None
 
             # Boyut kriterine göre filtrele
@@ -80,7 +103,7 @@ def fetch_image_url(keywords, source="pexels", min_width=800, min_height=600):
 def fetch_multiple_images(keywords, count=3, source="pexels", min_width=800, min_height=600):
     """Pexels veya Unsplash'tan minimum boyut kriterini karşılayan birden fazla resim URL'si alır."""
     if not keywords:
-        return []
+        return [], []
 
     image_urls = []
     image_sizes = []
@@ -88,17 +111,27 @@ def fetch_multiple_images(keywords, count=3, source="pexels", min_width=800, min
     if source == "pexels":
         api_key = os.getenv("PEXELS_API_KEY")
         if not api_key:
-            return []
+            print("Pexels API anahtarı bulunamadı.")
+            return [], []
 
         headers = {"Authorization": api_key}
         try:
-            # Daha fazla resim iste, böylece filtreleme yapabilirsin
-            response = requests.get(f"https://api.pexels.com/v1/search?query={keywords}&per_page={count * 3}",
-                                    headers=headers)
+            # URL encode yapalım
+            encoded_keywords = urllib.parse.quote(keywords)
+            api_url = f"https://api.pexels.com/v1/search?query={encoded_keywords}&per_page={count * 3}"
+
+            print(f"Pexels API isteği gönderiliyor (çoklu görseller): {api_url}")
+            response = requests.get(api_url, headers=headers, timeout=15)
+
+            if response.status_code != 200:
+                print(f"Pexels API yanıt kodu hatalı: {response.status_code}")
+                return [], []
+
             response_json = response.json()
 
             if "photos" not in response_json or not response_json["photos"]:
-                return []
+                print(f"Pexels API sonuç bulunamadı (çoklu görseller).")
+                return [], []
 
             # Boyut bilgisiyle birlikte resimleri depola
             filtered_photos = []
@@ -131,20 +164,31 @@ def fetch_multiple_images(keywords, count=3, source="pexels", min_width=800, min
 
             return image_urls, image_sizes
         except Exception as e:
-            print(f"Pexels API hatası: {e}")
+            print(f"Pexels API hatası (çoklu görseller): {e}")
             return [], []
 
     elif source == "unsplash":
         access_key = os.getenv("UNSPLASH_ACCESS_KEY")
         if not access_key:
+            print("Unsplash API anahtarı bulunamadı.")
             return [], []
 
         try:
-            response = requests.get(
-                f"https://api.unsplash.com/photos/random?query={keywords}&count={count * 2}&client_id={access_key}")
+            # URL encode yapalım
+            encoded_keywords = urllib.parse.quote(keywords)
+            api_url = f"https://api.unsplash.com/photos/random?query={encoded_keywords}&count={count * 2}&client_id={access_key}"
+
+            print(f"Unsplash API isteği gönderiliyor (çoklu görseller): {api_url}")
+            response = requests.get(api_url, timeout=15)
+
+            if response.status_code != 200:
+                print(f"Unsplash API yanıt kodu hatalı: {response.status_code}")
+                return [], []
+
             response_json = response.json()
 
             if not isinstance(response_json, list):
+                print(f"Unsplash API sonuç bulunamadı (çoklu görseller).")
                 return [], []
 
             # Boyut bilgisiyle birlikte resimleri depola
@@ -179,7 +223,7 @@ def fetch_multiple_images(keywords, count=3, source="pexels", min_width=800, min
 
             return image_urls, image_sizes
         except Exception as e:
-            print(f"Unsplash API hatası: {e}")
+            print(f"Unsplash API hatası (çoklu görseller): {e}")
             return [], []
 
     return [], []

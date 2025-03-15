@@ -72,6 +72,54 @@ def index():
                            wp_url=os.getenv("WP_URL"))
 
 
+# Çeviri sisteminin durumunu değiştirmek için yeni bir route
+@app.route("/toggle_translation", methods=["POST"])
+def toggle_translation():
+    data = request.json
+    enabled = data.get("enabled", False)
+
+    # TranslationManager'da çeviri durumunu ayarla
+    new_state = translation_manager.set_enabled(enabled)
+
+    return jsonify({"status": "success", "translation_enabled": new_state})
+
+
+@app.route("/translation_status")
+def translation_status():
+    return jsonify({"enabled": translation_manager.enabled})
+
+
+@app.route("/translate_keywords")
+def translate_keywords():
+    keywords = request.args.get("keywords", "")
+    if not keywords:
+        return jsonify({"translated": ""})
+
+    # Çeviri devre dışıysa orijinal metni döndür
+    if not translation_manager.enabled:
+        return jsonify({"translated": keywords, "translation_disabled": True})
+
+    try:
+        translated = translation_manager.translate_to_english(keywords)
+        print(f"Çeviri sonucu: {keywords} -> {translated}")
+
+        # Eğer çeviri yapılamadıysa (orijinal metin döndüyse) ve orijinal metinde Türkçe karakterler varsa
+        if translated == keywords and any(c in keywords for c in "çğıöşüÇĞİÖŞÜ"):
+            return jsonify({
+                "translated": translated,
+                "error": "Çeviri yapılamadı. Yerel kelime sözlüğü kullanılıyor."
+            })
+
+        return jsonify({"translated": translated})
+    except Exception as e:
+        print(f"Çeviri API hatası: {e}")
+        # Hata durumunda orijinal kelimeyi döndür
+        return jsonify({
+            "translated": keywords,
+            "error": f"Çeviri işlemi sırasında bir hata oluştu: {str(e)}"
+        })
+
+
 @app.route("/fetch_images")
 def fetch_images():
     keywords = request.args.get("keywords", "")
@@ -85,22 +133,42 @@ def fetch_images():
     if not keywords:
         return jsonify({"image_urls": [], "image_sizes": []})
 
-    # Önce çevrilmiş anahtar kelimeleri kullan, yoksa orijinali kullan
-    search_keywords = translated_keywords if translated_keywords else keywords
-    print(f"Görsel araması: {search_keywords}")
+    # Çeviri devre dışıysa, doğrudan anahtar kelimeleri kullan
+    if not translation_manager.enabled:
+        # Eğer keywords İngilizce değilse ve çeviri devre dışıysa, çeviriye ihtiyaç olduğu konusunda uyarı
+        if any(c in keywords for c in "çğıöşüÇĞİÖŞÜ"):
+            print("Uyarı: Türkçe karakterler içeren anahtar kelimeler var ve çeviri devre dışı.")
 
-    # Boyut bilgisini de döndür
-    image_urls, image_sizes = fetch_multiple_images(
-        search_keywords,
-        count=8,
-        source=source,
-        min_width=min_width,
-        min_height=min_height
-    )
+        print(f"Orijinal kelimelerle arama yapılıyor: {keywords}")
+        image_urls, image_sizes = fetch_multiple_images(
+            keywords,
+            count=8,
+            source=source,
+            min_width=min_width,
+            min_height=min_height
+        )
 
-    # Eğer sonuç yoksa ve çevrilmiş kelimeler kullanıldıysa, orijinal kelimelerle tekrar dene
-    if not image_urls and translated_keywords and translated_keywords != keywords:
-        print(f"Çevrilmiş kelimelerle sonuç bulunamadı, orijinal kelimelerle tekrar deneniyor: {keywords}")
+        return jsonify({"image_urls": image_urls, "image_sizes": image_sizes})
+
+    # Çeviri etkinse, aşağıdaki logik kullanılır
+    image_urls = []
+    image_sizes = []
+
+    # Önce çevrilmiş anahtar kelimelerle dene (eğer orijinal kelimelerden farklıysa)
+    if translated_keywords and translated_keywords != keywords:
+        print(f"Çevrilmiş kelimelerle arama yapılıyor: {translated_keywords}")
+        image_urls, image_sizes = fetch_multiple_images(
+            translated_keywords,
+            count=8,
+            source=source,
+            min_width=min_width,
+            min_height=min_height
+        )
+
+    # Eğer çevrilmiş kelimelerle sonuç bulunmadıysa veya çeviri yapılmadıysa,
+    # orijinal kelimelerle tekrar dene
+    if not image_urls:
+        print(f"Orijinal kelimelerle arama yapılıyor: {keywords}")
         image_urls, image_sizes = fetch_multiple_images(
             keywords,
             count=8,
@@ -110,22 +178,6 @@ def fetch_images():
         )
 
     return jsonify({"image_urls": image_urls, "image_sizes": image_sizes})
-
-
-@app.route("/translate_keywords")
-def translate_keywords():
-    keywords = request.args.get("keywords", "")
-    if not keywords:
-        return jsonify({"translated": ""})
-
-    try:
-        translated = translation_manager.translate_to_english(keywords)
-        print(f"Çeviri sonucu: {keywords} -> {translated}")
-        return jsonify({"translated": translated})
-    except Exception as e:
-        print(f"Çeviri API hatası: {e}")
-        # Hata durumunda orijinal kelimeyi döndür
-        return jsonify({"translated": keywords, "error": str(e)})
 
 
 @app.route('/save_template', methods=['POST'])
@@ -165,12 +217,19 @@ def resize_image():
         output_path = os.path.join('static', 'images', filename)
 
         # Görsel boyutlandır
-        if maintain_aspect:
-            # En-boy oranını koru
-            img.thumbnail((width, height), Image.LANCZOS)
-        else:
-            # Tam boyutlandırma
-            img = img.resize((width, height), Image.LANCZOS)
+        try:
+            if maintain_aspect:
+                # En-boy oranını koru
+                img.thumbnail((width, height), Image.Resampling.LANCZOS)
+            else:
+                # Tam boyutlandırma
+                img = img.resize((width, height), Image.Resampling.LANCZOS)
+        except AttributeError:
+            # Eski PIL sürümleri için
+            if maintain_aspect:
+                img.thumbnail((width, height), Image.LANCZOS)
+            else:
+                img = img.resize((width, height), Image.LANCZOS)
 
         # Kaydet
         img.save(output_path)

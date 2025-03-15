@@ -50,8 +50,20 @@
 
                 <div class="form-group">
                     <label>Anahtar Kelimeler (virgülle ayırın):</label>
-                    <input type="text" id="keywords" name="keywords" required>
-                    <div id="translated-keywords" class="translated-text"></div>
+                    <div class="keywords-container">
+                        <div class="keywords-input-container">
+                            <input type="text" id="keywords" name="keywords" required>
+                            <div class="translation-toggle-container">
+                                <input type="checkbox" id="translation-toggle" name="translation_toggle">
+                                <label for="translation-toggle" class="toggle-label">Çeviri</label>
+                                <div class="tooltip">
+                                    <span class="tooltiptext">Türkçe anahtar kelimeleri İngilizce'ye çevirir. İngilizce giriyorsanız devre dışı bırakın.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="translated-keywords-label" class="translated-label" style="display: none;">Çevrilmiş Anahtar Kelimeler:</div>
+                        <div id="translated-keywords" class="translated-text" style="display: none;"></div>
+                    </div>
                 </div>
 
                 <div class="form-group">

@@ -1,6 +1,4 @@
-// Eğer alternatif hizalama seçiliyse bunu da ekle
-        const alternatingAlignment = document.getElementById('alternating-alignment').checked;
-        formData.append('alternating_alignment', alternatingAlignment ? '1' : '0');// Genel yardımcı fonksiyonlar
+// Genel yardımcı fonksiyonlar
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -30,6 +28,93 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+// Global değişkenler
+let translationEnabled = false; // Varsayılan olarak devre dışı
+let selectedImages = [];
+
+// Yazının altına hizalama için özel fonksiyon
+function updateBottomAlignment() {
+    const contentImageAlignment = document.getElementById('content-image-alignment');
+    const alternatingCheck = document.getElementById('alternating-alignment');
+
+    // "Yazının Altında" seçeneği seçildiğinde alternatif hizalamayı devre dışı bırak
+    if (contentImageAlignment.value === 'bottom') {
+        alternatingCheck.checked = false;
+        alternatingCheck.disabled = true;
+    } else {
+        alternatingCheck.disabled = false;
+    }
+}
+
+// Sayfa yüklendiğinde çeviri durumunu kontrol et
+async function checkTranslationStatus() {
+    try {
+        const response = await fetch('/translation_status');
+        const data = await response.json();
+        translationEnabled = data.enabled;
+
+        // Checkbox durumunu güncelle
+        const translationToggle = document.getElementById('translation-toggle');
+        if (translationToggle) {
+            translationToggle.checked = translationEnabled;
+        }
+
+        // UI'ı güncelle
+        updateTranslationUI();
+    } catch (error) {
+        console.error('Çeviri durumu kontrol edilirken hata:', error);
+        // Hata durumunda varsayılan olarak kapalı
+        translationEnabled = false;
+        updateTranslationUI();
+    }
+}
+
+// Çeviri sistemini aç/kapa
+async function toggleTranslation(event) {
+    const enabled = event.target.checked;
+
+    try {
+        const response = await fetch('/toggle_translation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enabled })
+        });
+
+        const data = await response.json();
+        translationEnabled = data.translation_enabled;
+
+        // UI'ı güncelle
+        updateTranslationUI();
+
+        // Eğer değişiklik yapıldıysa ve anahtar kelimeler varsa, yeniden çeviri dene
+        const keywords = document.getElementById('keywords').value;
+        if (keywords) {
+            await handleKeywordsInput({ target: { value: keywords } });
+        }
+
+        showToast(`Çeviri sistemi ${translationEnabled ? 'etkinleştirildi' : 'devre dışı bırakıldı'}`, 'info');
+    } catch (error) {
+        console.error('Çeviri durumu değiştirilirken hata:', error);
+        showToast('Çeviri durumu değiştirilemedi', 'error');
+    }
+}
+
+// Çeviri UI güncellemesi
+function updateTranslationUI() {
+    const translatedKeywordsLabel = document.getElementById('translated-keywords-label');
+    const translatedKeywords = document.getElementById('translated-keywords');
+
+    if (translationEnabled) {
+        if (translatedKeywordsLabel) translatedKeywordsLabel.style.display = 'block';
+        if (translatedKeywords) translatedKeywords.style.display = 'block';
+    } else {
+        if (translatedKeywordsLabel) translatedKeywordsLabel.style.display = 'none';
+        if (translatedKeywords) translatedKeywords.style.display = 'none';
+    }
+}
+
 // Anahtar kelime çevirisi ve resim yükleme
 async function handleKeywordsInput(e) {
     const keywords = e.target.value;
@@ -39,18 +124,35 @@ async function handleKeywordsInput(e) {
     }
 
     try {
+        // Çeviri devre dışıysa, doğrudan görselleri yükle
+        if (!translationEnabled) {
+            console.log("Çeviri devre dışı, doğrudan görsel yükleniyor.");
+            await fetchImages(keywords, keywords);
+            return;
+        }
+
         console.log("Anahtar kelimeler çevriliyor:", keywords);
         document.getElementById('translated-keywords').textContent = '🔄 Çevriliyor...';
 
         const response = await fetch(`/translate_keywords?keywords=${encodeURIComponent(keywords)}`);
         const data = await response.json();
 
+        // Eğer çeviri devre dışı bırakıldıysa
+        if (data.translation_disabled) {
+            document.getElementById('translated-keywords').textContent = `ℹ️ Çeviri devre dışı, orijinal kelimeler kullanılıyor`;
+            await fetchImages(keywords, keywords);
+            return;
+        }
+
         let translatedKeywords = data.translated || keywords;
 
         if (data.error) {
             console.warn("Çeviri hatası:", data.error);
-            document.getElementById('translated-keywords').textContent = `⚠️ Çeviri hatası, orijinal kelimeler kullanılıyor`;
+            document.getElementById('translated-keywords').textContent = `⚠️ ${data.error}`;
             translatedKeywords = keywords; // Hata durumunda orijinal kelimeler
+
+            // Yine de görsel aramayı başlat, ama hata mesajını da göster
+            showToast('Çeviri yapılamadı. Orijinal anahtar kelimeler kullanılıyor.', 'warning');
         } else if (data.translated && data.translated !== keywords) {
             document.getElementById('translated-keywords').textContent = `🔄 ${data.translated}`;
 
@@ -59,6 +161,8 @@ async function handleKeywordsInput(e) {
             if (!tagsInput.value.trim()) {
                 tagsInput.value = keywords;
             }
+        } else if (data.translated === keywords) {
+            document.getElementById('translated-keywords').textContent = `ℹ️ Çeviri yapılamadı, orijinal kelimeler kullanılıyor`;
         } else {
             document.getElementById('translated-keywords').textContent = `ℹ️ Zaten İngilizce`;
         }
@@ -87,15 +191,22 @@ async function fetchImages(originalKeywords, translatedKeywords) {
     imageGrid.innerHTML = '<div class="loading">Görseller yükleniyor...</div>';
 
     try {
-        const response = await fetch(
-            `/fetch_images?keywords=${encodeURIComponent(originalKeywords)}&translated_keywords=${encodeURIComponent(translatedKeywords)}&source=${source}&min_width=${minWidth}&min_height=${minHeight}`
-        );
+        const url = `/fetch_images?keywords=${encodeURIComponent(originalKeywords)}&translated_keywords=${encodeURIComponent(translatedKeywords)}&source=${source}&min_width=${minWidth}&min_height=${minHeight}`;
+        console.log("Görsel API'ye istek gönderiliyor:", url);
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`HTTP Error: ${response.status}`);
+        }
+
         const data = await response.json();
 
         imageGrid.innerHTML = ''; // Mevcut resimleri temizle
 
         if (!data.image_urls || data.image_urls.length === 0) {
-            imageGrid.innerHTML = '<div class="error">Belirtilen kriterlere uygun görsel bulunamadı</div>';
+            imageGrid.innerHTML = '<div class="error">Belirtilen kriterlere uygun görsel bulunamadı.<br>Farklı anahtar kelimeler deneyin veya kaynak değiştirin.</div>';
+            showToast('Görsel bulunamadı. Lütfen farklı anahtar kelimeler deneyin.', 'warning');
             return;
         }
 
@@ -157,8 +268,8 @@ async function fetchImages(originalKeywords, translatedKeywords) {
         });
     } catch (error) {
         console.error('Resim yükleme hatası:', error);
-        imageGrid.innerHTML = '<div class="error">Görseller yüklenirken bir hata oluştu</div>';
-        showToast('Görseller yüklenirken bir hata oluştu', 'error');
+        imageGrid.innerHTML = `<div class="error">Görseller yüklenirken bir hata oluştu.<br>Hata: ${error.message}</div>`;
+        showToast(`Görseller yüklenirken bir hata oluştu: ${error.message}`, 'error');
     }
 }
 
@@ -239,9 +350,6 @@ async function resizeSelectedImage() {
     closeResizeModal();
 }
 
-// Global değişkenler
-let selectedImages = [];
-
 // Resim seçimi
 function selectImage(url, container) {
     const existingIndex = selectedImages.findIndex(img => img.url === url);
@@ -317,6 +425,7 @@ function updateSelectedImagesDisplay() {
             <option value="left" ${imgData.alignment === 'left' ? 'selected' : ''}>Sola Hizala</option>
             <option value="center" ${imgData.alignment === 'center' ? 'selected' : ''}>Ortala</option>
             <option value="right" ${imgData.alignment === 'right' ? 'selected' : ''}>Sağa Hizala</option>
+            <option value="bottom" ${imgData.alignment === 'bottom' ? 'selected' : ''}>Yazının Altında</option>
         `;
         alignmentSelect.onchange = (e) => {
             imgData.alignment = e.target.value;
@@ -421,6 +530,10 @@ async function submitForm(event) {
         }
     }
 
+    // Eğer alternatif hizalama seçiliyse bunu da ekle
+    const alternatingAlignment = document.getElementById('alternating-alignment').checked;
+    formData.append('alternating_alignment', alternatingAlignment ? '1' : '0');
+
     try {
         const response = await fetch(form.action, {
             method: 'POST',
@@ -497,6 +610,18 @@ function updatePreview() {
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
+    // Çeviri toggle kontrolünü ekle
+    const translationToggle = document.getElementById('translation-toggle');
+    if (translationToggle) {
+        translationToggle.addEventListener('change', toggleTranslation);
+    }
+
+    // Sayfa yüklendiğinde çeviri durumunu kontrol et
+    checkTranslationStatus();
+
+    // Yazının altına hizalama kontrolünü başlat
+    updateBottomAlignment();
+
     // Anahtar kelime değişikliklerini dinle
     const keywordsInput = document.getElementById('keywords');
     keywordsInput.addEventListener('input', debounce(handleKeywordsInput, 500));
@@ -504,23 +629,46 @@ document.addEventListener('DOMContentLoaded', () => {
     // Resim kaynağı değişikliklerini dinle
     document.getElementById('source').addEventListener('change', () => {
         const keywords = document.getElementById('keywords').value;
-        if (keywords) fetchImages(keywords);
+        if (keywords) {
+            if (translationEnabled) {
+                handleKeywordsInput({ target: { value: keywords } });
+            } else {
+                fetchImages(keywords, keywords);
+            }
+        }
     });
 
     // Minimum görsel boyutu değişikliklerini dinle
     document.getElementById('min-width').addEventListener('change', debounce(() => {
         const keywords = document.getElementById('keywords').value;
-        if (keywords) fetchImages(keywords);
+        if (keywords) {
+            if (translationEnabled) {
+                handleKeywordsInput({ target: { value: keywords } });
+            } else {
+                fetchImages(keywords, keywords);
+            }
+        }
     }, 500));
 
     document.getElementById('min-height').addEventListener('change', debounce(() => {
         const keywords = document.getElementById('keywords').value;
-        if (keywords) fetchImages(keywords);
+        if (keywords) {
+            if (translationEnabled) {
+                handleKeywordsInput({ target: { value: keywords } });
+            } else {
+                fetchImages(keywords, keywords);
+            }
+        }
     }, 500));
 
     // Görsel hizalama değişikliklerini ve alternatif hizalamayı dinle
     document.getElementById('featured-image-alignment').addEventListener('change', updatePreview);
-    document.getElementById('content-image-alignment').addEventListener('change', updatePreview);
+    document.getElementById('content-image-alignment').addEventListener('change', function() {
+        // "Yazının Altında" seçeneği için özel kontrol
+        updateBottomAlignment();
+        updatePreview();
+    });
+
     document.getElementById('alternating-alignment').addEventListener('change', function() {
         // Alternatif hizalama seçildiğinde içerik görselleri seçiciyi devre dışı bırak
         const contentAlignSelect = document.getElementById('content-image-alignment');

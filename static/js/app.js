@@ -470,12 +470,15 @@ function closeModal() {
 
 async function saveTemplate() {
     const name = document.getElementById('template-name').value;
-    const content = document.getElementById('template-content').value;
+    let content = document.getElementById('template-content').value;
 
     if (!name || !content) {
         alert('Lütfen şablon adı ve içeriği giriniz.');
         return;
     }
+
+    // Convert old style {variable} to new style @variable@ if needed
+    content = content.replace(/\{([^{}]*)\}/g, '@$1@');
 
     try {
         const response = await fetch('/save_template', {

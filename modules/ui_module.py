@@ -123,28 +123,47 @@ def handle_form_submission(data, wp_client):
                     'alignment': data.get('content_image_alignment', 'none')
                 })
 
+        # Handle content_image_1, content_image_2, etc. for the template
+        content_image_placeholders = {}
+        for i, img in enumerate(content_images, 1):
+            if i <= 3:  # Only use first 3 images for placeholders
+                img_url = img['url'] if isinstance(img, dict) else img
+                img_alignment = img['alignment'] if isinstance(img, dict) and 'alignment' in img else 'none'
+                content_image_placeholders[f'content_image_{i}'] = template_manager._format_content_image(
+                    img_url, f"Content image {i}", img_alignment
+                )
+
         # Etiketleri hazırla
         tags = data.get('tags', '')
         if not tags and 'keywords' in data:
             tags = data['keywords']  # Etiket yoksa anahtar kelimeleri kullan
 
         try:
+            # Create template parameters
+            template_params = {
+                'title': data['title'],
+                'content': data['content'],
+                'tags': tags,
+                'featured_image': image_urls[0] if image_urls else None,
+                'content_images': content_images,
+                'image_alignment': data.get('image_alignment', 'none'),
+                'content_image_alignment': data.get('content_image_alignment', 'none'),
+                'alternating_alignment': alternating_alignment,
+                'date': datetime.now().strftime('%d.%m.%Y')
+            }
+
+            # Add individual content images
+            template_params.update(content_image_placeholders)
+
             # Şablonu uygula
             template_name = data.get('template', 'default')
             formatted_content = template_manager.apply_template(
                 template_name,
-                title=data['title'],
-                content=data['content'],
-                tags=tags,
-                featured_image=image_urls[0] if image_urls else None,
-                content_images=content_images,
-                image_alignment=data.get('image_alignment', 'none'),
-                content_image_alignment=data.get('content_image_alignment', 'none'),
-                alternating_alignment=alternating_alignment,
-                date=datetime.now().strftime('%d.%m.%Y')
+                **template_params
             )
         except Exception as template_error:
             print(f"Şablon uygulama hatası: {template_error}")
+            traceback.print_exc()
             # Hata durumunda basit içerik üret
             formatted_content = f"<h1>{data['title']}</h1>\n\n{data['content']}"
             if image_urls:

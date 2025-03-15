@@ -39,26 +39,29 @@ class TemplateManager:
     def _get_default_template(self) -> Dict:
         return {
             "name": "Varsayılan Blog Şablonu",
-            "content": """<!-- wp:image {"align":"{image_alignment}","className":"featured-image"} -->
-{featured_image}
+            "content": """<!-- wp:image {"align":"@image_alignment@","className":"featured-image"} -->
+@featured_image@
 <!-- /wp:image -->
 
-<h1>{title}</h1>
+<h1>@title@</h1>
 
-{content}
+@content@
 
 <div class="content-images">
-{content_images}
+@content_images@
 </div>
 
 <hr/>
-<p><strong>Etiketler:</strong> {tags}</p>""",
+<p><strong>Etiketler:</strong> @tags@</p>""",
             "created_at": datetime.now().isoformat()
         }
 
     def save_template(self, name: str, content: str) -> None:
         try:
             templates = self.get_templates()
+            # Convert '{' and '}' style placeholders to '@' style for new templates
+            content = content.replace("{", "@").replace("}", "@")
+
             templates[name] = {
                 "name": name,
                 "content": content,
@@ -78,6 +81,11 @@ class TemplateManager:
                 template_name = "default"
 
             template_content = templates[template_name]["content"]
+
+            # Convert older templates using curly braces to our new format with '@' delimiters
+            if "{" in template_content and "}" in template_content:
+                # Replace simple variable placeholders but preserve WordPress block attributes
+                template_content = self._convert_to_at_format(template_content)
 
             # Resim hizalaması
             image_alignment = kwargs.get('image_alignment', 'none')
@@ -167,37 +175,57 @@ class TemplateManager:
             # Image_alignment değerini template'e ekle
             kwargs['image_alignment'] = image_alignment
 
-            # Şablonda bulunmayan değişkenler için çözüm
-            # Şablonda kullanılan tüm değişkenleri bul
-            template_vars = re.findall(r'\{([^{}]*)\}', template_content)
+            # Now replace all @variable@ style placeholders
+            for key, value in kwargs.items():
+                placeholder = f"@{key}@"
+                template_content = template_content.replace(placeholder, str(value))
 
-            # Eksik değişkenler için boş değer ata
-            for var in template_vars:
-                if var not in kwargs:
-                    if '"' in var:  # WordPress bloğu için ek çift tırnaklı attribute
-                        # Örn: {"className":"featured-image"}
-                        kwargs[var] = ""
-                    else:
-                        kwargs[var] = ""
+            # Remove any remaining @variable@ placeholders with empty strings
+            template_content = re.sub(r'@\w+@', '', template_content)
 
-            return template_content.format(**kwargs)
+            return template_content
 
-        except KeyError as e:
-            import traceback
-            traceback.print_exc()
-            print(f"Şablon değişkeni bulunamadı: {e}")
-            # WordPress bloğundaki çift tırnaklı değişkenler için düzeltme
-            if '"' in str(e):
-                # Eksik değişkeni şablondan temizle
-                template_content = template_content.replace('{' + str(e).strip("'") + '}', '')
-                # Yeniden dene
-                return self.apply_template(template_name, **kwargs)
-            else:
-                raise Exception(f"Şablon uygulama hatası: Eksik değişken: {str(e)}")
         except Exception as e:
             import traceback
             traceback.print_exc()
-            raise Exception(f"Şablon uygulama hatası: {str(e)}")
+            print(f"Şablon uygulama hatası: {e}")
+
+            # Fallback to a very simple template if everything fails
+            simple_content = f"<h1>{kwargs.get('title', '')}</h1>\n\n{kwargs.get('content', '')}"
+            if kwargs.get('featured_image'):
+                simple_content = f"<img src='{kwargs.get('featured_image', '')}' alt='{kwargs.get('title', '')}' />\n\n" + simple_content
+            simple_content += f"\n\n<p><strong>Etiketler:</strong> {kwargs.get('tags', '')}</p>"
+
+            return simple_content
+
+    def _convert_to_at_format(self, template_content):
+        """Convert curly brace format to @ format, preserving WordPress block attributes."""
+        # First protect WordPress block attributes with a special marker
+        protected_content = re.sub(
+            r'(<!-- wp:.*?)(\{.*?\})(.*?-->)',
+            lambda m: m.group(1) + '__PROTECTED__' + str(hash(m.group(2))) + '__PROTECTED__' + m.group(3),
+            template_content
+        )
+
+        # Now convert regular variable placeholders
+        protected_content = re.sub(
+            r'\{([^{}]*)\}',
+            r'@\1@',
+            protected_content
+        )
+
+        # Restore protected WordPress block attributes
+        for match in re.finditer(r'__PROTECTED__(-?\d+)__PROTECTED__', protected_content):
+            hash_value = match.group(1)
+            for original_match in re.finditer(r'(<!-- wp:.*?)(\{.*?\})(.*?-->)', template_content):
+                if str(hash(original_match.group(2))) == hash_value:
+                    protected_content = protected_content.replace(
+                        f'__PROTECTED__{hash_value}__PROTECTED__',
+                        original_match.group(2)
+                    )
+                    break
+
+        return protected_content
 
     def _format_featured_image(self, image_url: str, alt_text: str = '', alignment: str = 'none') -> str:
         if not image_url:
@@ -213,7 +241,7 @@ class TemplateManager:
     def _format_content_image(self, image_url: str, alt_text: str = '', alignment: str = 'none') -> str:
         align_class = f"align{alignment}" if alignment != 'none' else ""
 
-        # JSON içindeki çift tırnak kaçış karakterlerini düzgünce formatla
+        # Use double braces for JSON literals in WordPress blocks
         return f"""<!-- wp:image {{"align":"{alignment}"}} -->
 <figure class="wp-block-image {align_class}">
     <img src="{image_url}" alt="{html.escape(alt_text)}" class="content-image"/>

@@ -1,9 +1,12 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 import os
 from modules.ui_module import handle_form_submission
 from modules.wordpress_module import WordpressClient
-from modules.image_module import fetch_image_url, fetch_multiple_images
+from modules.image_module import fetch_multiple_images
+from modules.translation_manager import TranslationManager
+from modules.template_manager import TemplateManager
+from modules.history_manager import HistoryManager
 
 load_dotenv("config.env")
 
@@ -15,21 +18,60 @@ wp_client = WordpressClient(
     password=os.getenv("WP_APP_PASSWORD")
 )
 
+template_manager = TemplateManager()
+history_manager = HistoryManager()
+translation_manager = TranslationManager()
+
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    message = None
     if request.method == 'POST':
-        form_data = request.form
-        message = handle_form_submission(form_data, wp_client)
-    return render_template('index.html', message=message)
+        result = handle_form_submission(request.form, wp_client)
+        return jsonify(result)
 
-@app.route("/fetch_image")
-def fetch_image():
+    # GET isteği için template ve geçmiş verileri hazırla
+    templates = template_manager.get_templates()
+    history = history_manager.get_posts_history()
+    stats = history_manager.get_post_stats()
+
+    return render_template('index.html',
+                           templates=templates,
+                           history=history,
+                           stats=stats,
+                           wp_url=os.getenv("WP_URL"))
+
+
+@app.route("/fetch_images")
+def fetch_images():
     keywords = request.args.get("keywords", "")
     source = request.args.get("source", "pexels")
 
-    image_url = fetch_image_url(keywords, source)
-    return {"image_url": image_url}
+    if not keywords:
+        return jsonify({"image_urls": []})
+
+    image_urls = fetch_multiple_images(keywords, count=8, source=source)
+    return jsonify({"image_urls": image_urls})
+
+
+@app.route("/translate_keywords")
+def translate_keywords():
+    keywords = request.args.get("keywords", "")
+    if not keywords:
+        return jsonify({"translated": ""})
+
+    translated = translation_manager.translate_to_english(keywords)
+    return jsonify({"translated": translated})
+
+
+@app.route('/save_template', methods=['POST'])
+def save_template():
+    try:
+        data = request.get_json()
+        template_manager.save_template(data['name'], data['content'])
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
 
 if __name__ == '__main__':
     app.run(debug=True)

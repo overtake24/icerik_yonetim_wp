@@ -5,3 +5,4 @@ config.env
 static/resized_image.jpg
 posts_history.db
 translation_cache.json
+config.env
